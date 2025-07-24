@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+
+ABSPATH="$(
+  cd "${BASH_SOURCE[0]%/*}" 2>/dev/null
+  echo "$PWD"/"${BASH_SOURCE[0]##*/}"
+)"
+BASEDIR="$(dirname $ABSPATH)"
+
+PY_DIR=py
+
+python3 -m venv ${PY_DIR}
+if ! python3 -m venv ${PY_DIR}; then
+  echo "Exiting because of python3 or pip setup error"
+  exit 1
+fi
+
+CURRENT_PYTHON3=$(which python3)
+if [ "$CURRENT_PYTHON3" != "${BASEDIR}/${PY_DIR}/bin/python3" ]; then
+  echo
+  echo "*****************************************"
+  echo " Do the following"
+  echo "*****************************************"
+  echo "source ${PY_DIR}/bin/activate && $0"
+  exit 0
+fi
+
+[[ -r "requirements.txt" ]] && python3 -m pip install --upgrade -r requirements.txt
+
+if [ -r "setup.py" ]; then
+  PKG_NAME=$(grep "name='" setup.py | cut -d= -f2- | sed -e "s/[', ]//g")
+  PKG_VER=$(grep "version='" setup.py | cut -d= -f2- | sed -e "s/[', ]//g")
+  PKG_TGZ_NAME="${PKG_NAME}-${PKG_VER}.tar.gz"
+  CURRENT_PYTHON3=$(which python3)
+  if [ "$CURRENT_PYTHON3" == "${BASEDIR}/${PY_DIR}/bin/python3" ]; then
+    echo "*****************************************"
+    echo "Install local $PKG_NAME"
+    echo "*****************************************"
+    python3 -m pip install --upgrade . || exit 1
+    echo "*****************************************"
+    echo "Uninstall local $PKG_NAME"
+    echo "*****************************************"
+    python3 -m pip uninstall -y "${PKG_NAME}" || exit 1
+    echo "*****************************************"
+    echo "Building source distribution"
+    echo "*****************************************"
+    python3 -m build --wheel --sdist . || exit 1
+    echo "*****************************************"
+    echo "Checking package for distribution"
+    echo "*****************************************"
+    python3 -m twine check dist/* || exit 1
+    RELREG="^(1|True|true|TRUE)$"
+    if [[ "$RELEASE_FLAG" =~ $RELREG ]]; then
+      echo "*****************************************"
+      echo "Upload package to pypi (RELEASE)"
+      echo "*****************************************"
+      python3 -m twine upload "dist/${PKG_NAME}-${PKG_VER}*" || exit 1
+      echo "*****************************************"
+      echo "Install package from pypi (RELEASE)"
+      echo "*****************************************"
+      python3 -m pip install --upgrade --no-deps "${PKG_NAME}" || exit 1
+    else
+      echo "*****************************************"
+      echo "Upload package to testpypi"
+      echo "*****************************************"
+      python3 -m twine upload --repository testpypi "dist/${PKG_NAME}-${PKG_VER}*" || exit 1
+      echo "*****************************************"
+      echo "Install package from testpypi"
+      echo "*****************************************"
+      python3 -m pip install --upgrade --index-url https://test.pypi.org/simple/ --no-deps "${PKG_NAME}" || exit 1
+    fi
+
+  else
+    echo "Please activate run source '${PY_DIR}/bin/activate' and rerun $0"
+  fi
+fi
